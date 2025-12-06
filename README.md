@@ -36,11 +36,18 @@ When using the `listen` function, the following caveats apply:
 
 ### Mac OS
 The process running the blocking `listen` function (loop) needs to be the parent process (no fork before).
-The process needs to be granted access to the Accessibility API (ie. if you're running your process
+The process needs to be granted access to the **Accessibility API** (ie. if you're running your process
 inside Terminal.app, then Terminal.app needs to be added in
-System Preferences > Security & Privacy > Privacy > Accessibility)
+System Preferences > Security & Privacy > Privacy > Accessibility).
+
+**Note:** This fork uses `NSEvent.addGlobalMonitorForEvents` instead of `CGEventTap`, which means:
+- Only **Accessibility permission** is required, NOT Input Monitoring permission
+- This is more privacy-friendly and easier for users to configure
+- Your callback will NOT be called for events sent to your own application (this is a limitation of NSEvent global monitors)
+- Events can only be observed, not modified (use `grab` for event modification, which still requires Input Monitoring)
+
 If the process is not granted access to the Accessibility API, MacOS will silently ignore rdev's
-`listen` calleback and will not trigger it with events. No error will be generated.
+`listen` callback and will not trigger it with events. No error will be generated.
 
 ### Linux
 The `listen` function uses X11 APIs, and so will not work in Wayland or in the linux kernel virtual console

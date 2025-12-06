@@ -28,6 +28,36 @@ pub type OSType = FourCharCode;
 pub type PhysicalKeyboardLayoutType = OSType;
 pub type SInt16 = ::std::os::raw::c_short;
 
+// NSEvent type constants
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeLeftMouseDown: u64 = 1;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeLeftMouseUp: u64 = 2;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeRightMouseDown: u64 = 3;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeRightMouseUp: u64 = 4;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeMouseMoved: u64 = 5;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeLeftMouseDragged: u64 = 6;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeRightMouseDragged: u64 = 7;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeKeyDown: u64 = 10;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeKeyUp: u64 = 11;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeFlagsChanged: u64 = 12;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeScrollWheel: u64 = 22;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeOtherMouseDown: u64 = 25;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeOtherMouseUp: u64 = 26;
+#[allow(non_upper_case_globals, dead_code)]
+pub const NSEventTypeOtherMouseDragged: u64 = 27;
+
 #[allow(non_upper_case_globals, dead_code)]
 pub const kUnknownType: FourCharCode = 1061109567;
 #[allow(non_upper_case_globals, dead_code)]
@@ -308,6 +338,123 @@ fn key_to_name(key: Key) -> &'static str {
         BackQuote => "`",
         _ => "",
     }
+}
+
+/// Convert an NSEvent to our Event type
+/// This is used by the NSEvent-based listener which only requires Accessibility permission
+#[allow(dead_code, non_upper_case_globals)]
+pub unsafe fn convert_ns_event(ns_event: id, keyboard_state: &mut Keyboard) -> Option<Event> {
+    use cocoa::base::nil;
+
+    if ns_event == nil {
+        return None;
+    }
+
+    let event_type_raw: u64 = msg_send![ns_event, type];
+    let mut code: CGKeyCode = 0;
+
+    let option_type = match event_type_raw {
+        NSEventTypeLeftMouseDown => Some(EventType::ButtonPress(Button::Left)),
+        NSEventTypeLeftMouseUp => Some(EventType::ButtonRelease(Button::Left)),
+        NSEventTypeRightMouseDown => Some(EventType::ButtonPress(Button::Right)),
+        NSEventTypeRightMouseUp => Some(EventType::ButtonRelease(Button::Right)),
+        NSEventTypeOtherMouseDown => {
+            let button_number: i64 = msg_send![ns_event, buttonNumber];
+            match button_number {
+                2 => Some(EventType::ButtonPress(Button::Middle)),
+                n => Some(EventType::ButtonPress(Button::Unknown(n as u8))),
+            }
+        }
+        NSEventTypeOtherMouseUp => {
+            let button_number: i64 = msg_send![ns_event, buttonNumber];
+            match button_number {
+                2 => Some(EventType::ButtonRelease(Button::Middle)),
+                n => Some(EventType::ButtonRelease(Button::Unknown(n as u8))),
+            }
+        }
+        NSEventTypeMouseMoved | NSEventTypeLeftMouseDragged | NSEventTypeRightMouseDragged | NSEventTypeOtherMouseDragged => {
+            // Get mouse location in screen coordinates
+            let location: cocoa::foundation::NSPoint = msg_send![ns_event, locationInWindow];
+            // Get the window - for global events, this will be nil and location will be in screen coords
+            let window: id = msg_send![ns_event, window];
+            let (x, y) = if window == nil {
+                // For global events without a window, locationInWindow is in screen coordinates
+                // with origin at bottom-left, we need to flip Y
+                let screen: id = msg_send![class!(NSScreen), mainScreen];
+                let frame: cocoa::foundation::NSRect = msg_send![screen, frame];
+                (location.x, frame.size.height - location.y)
+            } else {
+                // Convert window coordinates to screen coordinates
+                let screen_location: cocoa::foundation::NSPoint = msg_send![window, convertPointToScreen: location];
+                let screen: id = msg_send![class!(NSScreen), mainScreen];
+                let frame: cocoa::foundation::NSRect = msg_send![screen, frame];
+                (screen_location.x, frame.size.height - screen_location.y)
+            };
+            Some(EventType::MouseMove { x, y })
+        }
+        NSEventTypeKeyDown => {
+            code = msg_send![ns_event, keyCode];
+            Some(EventType::KeyPress(key_from_code(code)))
+        }
+        NSEventTypeKeyUp => {
+            code = msg_send![ns_event, keyCode];
+            Some(EventType::KeyRelease(key_from_code(code)))
+        }
+        NSEventTypeFlagsChanged => {
+            code = msg_send![ns_event, keyCode];
+            let flags_raw: u64 = msg_send![ns_event, modifierFlags];
+            let flags = CGEventFlags::from_bits_truncate(flags_raw);
+            if flags < LAST_FLAGS {
+                LAST_FLAGS = flags;
+                Some(EventType::KeyRelease(key_from_code(code)))
+            } else {
+                LAST_FLAGS = flags;
+                Some(EventType::KeyPress(key_from_code(code)))
+            }
+        }
+        NSEventTypeScrollWheel => {
+            let delta_x: f64 = msg_send![ns_event, scrollingDeltaX];
+            let delta_y: f64 = msg_send![ns_event, scrollingDeltaY];
+            Some(EventType::Wheel {
+                delta_x: delta_x as i64,
+                delta_y: delta_y as i64,
+            })
+        }
+        _ => None,
+    };
+
+    if let Some(event_type) = option_type {
+        let unicode = match event_type {
+            EventType::KeyPress(..) => {
+                #[allow(non_upper_case_globals)]
+                let skip_unicode = match code {
+                    kVK_Shift | kVK_RightShift | kVK_ForwardDelete => true,
+                    _ => false,
+                };
+                if skip_unicode {
+                    None
+                } else {
+                    let flags_raw: u64 = msg_send![ns_event, modifierFlags];
+                    let flags = CGEventFlags::from_bits_truncate(flags_raw);
+                    let s = keyboard_state.create_unicode_for_key(code as u32, flags);
+                    s
+                }
+            }
+            EventType::KeyRelease(..) => None,
+            _ => None,
+        };
+
+        return Some(Event {
+            event_type,
+            time: SystemTime::now(),
+            unicode,
+            platform_code: code as _,
+            position_code: 0 as _,
+            usb_hid: 0,
+            extra_data: 0, // NSEvent doesn't have user data like CGEvent
+        });
+    }
+    None
 }
 
 #[cfg(test)]
