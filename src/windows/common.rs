@@ -12,7 +12,8 @@ use winapi::shared::windef::HHOOK;
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::winuser::{
     GetForegroundWindow, GetKeyboardLayout, GetWindowThreadProcessId, MapVirtualKeyExW,
-    SetWindowsHookExA, KBDLLHOOKSTRUCT, MAPVK_VK_TO_VSC_EX, MSLLHOOKSTRUCT, VK_PACKET, WHEEL_DELTA,
+    SetWindowsHookExA, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLKHF_LOWER_IL_INJECTED, LLMHF_INJECTED,
+    MAPVK_VK_TO_VSC_EX, MSLLHOOKSTRUCT, VK_PACKET, WHEEL_DELTA,
     WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
     WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
@@ -61,6 +62,16 @@ pub unsafe fn get_scan_code(lpdata: LPARAM) -> DWORD {
         }
     }
 }
+pub unsafe fn is_kb_injected(lpdata: LPARAM) -> bool {
+    let kb = *(lpdata as *const KBDLLHOOKSTRUCT);
+    (kb.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED)) != 0
+}
+
+pub unsafe fn is_mouse_injected(lpdata: LPARAM) -> bool {
+    let mouse = *(lpdata as *const MSLLHOOKSTRUCT);
+    (mouse.flags & LLMHF_INJECTED) != 0
+}
+
 pub unsafe fn get_point(lpdata: LPARAM) -> (LONG, LONG) {
     let mouse = *(lpdata as *const MSLLHOOKSTRUCT);
     (mouse.pt.x, mouse.pt.y)

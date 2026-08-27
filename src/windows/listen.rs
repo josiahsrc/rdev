@@ -1,6 +1,9 @@
 use crate::{
     rdev::{Event, ListenError},
-    windows::common::{convert, get_scan_code, set_key_hook, set_mouse_hook, HookError},
+    windows::common::{
+        convert, get_scan_code, is_kb_injected, is_mouse_injected, set_key_hook, set_mouse_hook,
+        HookError,
+    },
 };
 use std::{os::raw::c_int, ptr::null_mut, time::SystemTime};
 use winapi::{
@@ -27,6 +30,7 @@ unsafe fn raw_callback(
     param: WPARAM,
     lpdata: LPARAM,
     f_get_extra_data: impl FnOnce(isize) -> ULONG_PTR,
+    f_is_injected: impl FnOnce(isize) -> bool,
 ) -> LRESULT {
     if code == HC_ACTION {
         let (opt, code) = convert(param, lpdata);
@@ -38,6 +42,7 @@ unsafe fn raw_callback(
                 platform_code: code as _,
                 position_code: get_scan_code(lpdata),
                 usb_hid: 0,
+                is_injected: f_is_injected(lpdata),
                 extra_data: f_get_extra_data(lpdata),
             };
             if let Some(callback) = &mut GLOBAL_CALLBACK {
@@ -49,15 +54,23 @@ unsafe fn raw_callback(
 }
 
 unsafe extern "system" fn raw_callback_mouse(code: i32, param: usize, lpdata: isize) -> isize {
-    raw_callback(code, param, lpdata, |data: isize| unsafe {
-        (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo
-    })
+    raw_callback(
+        code,
+        param,
+        lpdata,
+        |data: isize| unsafe { (*(data as PMOUSEHOOKSTRUCT)).dwExtraInfo },
+        |data: isize| unsafe { is_mouse_injected(data) },
+    )
 }
 
 unsafe extern "system" fn raw_callback_keyboard(code: i32, param: usize, lpdata: isize) -> isize {
-    raw_callback(code, param, lpdata, |data: isize| unsafe {
-        (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo
-    })
+    raw_callback(
+        code,
+        param,
+        lpdata,
+        |data: isize| unsafe { (*(data as PKBDLLHOOKSTRUCT)).dwExtraInfo },
+        |data: isize| unsafe { is_kb_injected(data) },
+    )
 }
 
 pub fn listen<T>(callback: T) -> Result<(), ListenError>

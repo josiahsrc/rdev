@@ -248,6 +248,7 @@ pub unsafe fn convert(
             platform_code: code as _,
             position_code: 0 as _,
             usb_hid: 0,
+            is_injected: false,
             extra_data: cg_event.get_integer_value_field(EventField::EVENT_SOURCE_USER_DATA),
         });
     }

@@ -13,6 +13,7 @@ fn main() {
         platform_code: 0,
         position_code: 0,
         usb_hid: 0,
+        is_injected: false,
         extra_data: 0 as _,
     };
 

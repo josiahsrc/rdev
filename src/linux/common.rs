@@ -70,6 +70,7 @@ pub fn convert(
         platform_code: code as _,
         position_code: code as _,
         usb_hid: 0,
+        is_injected: false,
     })
 }
 

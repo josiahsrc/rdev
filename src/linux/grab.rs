@@ -154,6 +154,7 @@ fn convert_event(code: u32, is_press: bool) -> Event {
         platform_code,
         position_code: code as _,
         usb_hid: 0,
+        is_injected: false,
     }
 }
 
